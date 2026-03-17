@@ -1,0 +1,13 @@
+build/
+*.o
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+.qmake.stash
+Makefile*
+*.pro.user
+*.autosave
+*.deb
+.DS_Store
+.opencode/
+openspec/

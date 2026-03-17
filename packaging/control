@@ -1,0 +1,9 @@
+Package: reader
+Version: 1.0.0
+Section: office
+Priority: optional
+Architecture: arm64
+Depends: qt5-default, libqt5widgets5, libqt5gui5, libqt5core5a
+Maintainer: User <user@example.com>
+Description: TXT文本阅读器
+ 一个简洁的TXT文本阅读器，支持自动目录识别、透明背景、快捷键隐藏等功能。

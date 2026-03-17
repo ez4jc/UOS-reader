@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=阅读器
+Comment=TXT文本阅读器
+Exec=/opt/reader/bin/reader %U
+Icon=reader
+Terminal=false
+Type=Application
+Categories=Office;Viewer;
+MimeType=text/plain;
