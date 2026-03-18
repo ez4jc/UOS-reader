@@ -116,6 +116,30 @@ void MainWindow::setupUi()
 
 void MainWindow::createMenuBar()
 {
+    menuBar()->setAutoFillBackground(true);
+    menuBar()->setStyleSheet(
+        "QMenuBar {"
+        "  background-color: palette(window);"
+        "  color: palette(window-text);"
+        "}"
+        "QMenuBar::item {"
+        "  background-color: palette(window);"
+        "  color: palette(window-text);"
+        "}"
+        "QMenuBar::item:selected {"
+        "  background-color: palette(highlight);"
+        "  color: palette(highlighted-text);"
+        "}"
+        "QMenu {"
+        "  background-color: palette(window);"
+        "  color: palette(window-text);"
+        "}"
+        "QMenu::item:selected {"
+        "  background-color: palette(highlight);"
+        "  color: palette(highlighted-text);"
+        "}"
+    );
+
     QMenu* fileMenu = menuBar()->addMenu("文件(&F)");
 
     QAction* openAction = new QAction("打开(&O)", this);
@@ -183,17 +207,8 @@ void MainWindow::createToolBar()
 
 void MainWindow::createTitleButtons()
 {
-    m_minimizeButton = new QPushButton(this);
-    m_minimizeButton->setText("─");
-    m_minimizeButton->setFixedSize(30, 30);
-    m_minimizeButton->hide();
-    connect(m_minimizeButton, &QPushButton::clicked, this, &MainWindow::onMinimizeButtonClicked);
-
-    m_closeButton = new QPushButton(this);
-    m_closeButton->setText("×");
-    m_closeButton->setFixedSize(30, 30);
-    m_closeButton->hide();
-    connect(m_closeButton, &QPushButton::clicked, this, &MainWindow::onCloseButtonClicked);
+    m_minimizeButton = nullptr;
+    m_closeButton = nullptr;
 }
 
 void MainWindow::onMinimizeButtonClicked()
@@ -264,6 +279,7 @@ void MainWindow::updateAppearance()
 
     m_textBrowser->setStyleSheet(style);
     m_textBrowser->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+    menuBar()->setAutoFillBackground(true);
     
     if (opacity < 100) {
         QPalette pal = palette();
@@ -275,12 +291,6 @@ void MainWindow::updateAppearance()
         setStyleSheet("");
     }
 
-    if (m_closeButton && !m_isTransparent) {
-        m_closeButton->move(width() - 40, 5);
-    }
-    if (m_minimizeButton && !m_isTransparent) {
-        m_minimizeButton->move(width() - 80, 5);
-    }
 }
 
 void MainWindow::updateChapterList()
@@ -351,8 +361,6 @@ void MainWindow::enterTransparentMode()
     if (toolbar) toolbar->hide();
     statusBar()->hide();
     m_chapterList->hide();
-    m_closeButton->hide();
-    m_minimizeButton->hide();
     
     setStyleSheet("MainWindow { background: transparent; }");
     show();
@@ -370,8 +378,6 @@ void MainWindow::exitTransparentMode()
     if (toolbar) toolbar->show();
     statusBar()->show();
     m_chapterList->show();
-    m_closeButton->show();
-    m_minimizeButton->show();
     
     setStyleSheet("");
     updateAppearance();
