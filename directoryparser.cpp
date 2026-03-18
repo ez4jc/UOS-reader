@@ -11,8 +11,6 @@ DirectoryParser::DirectoryParser(QObject *parent)
                << "^CHAPTER\\s+\\d+.*"
                << "^Part\\s+[IVXLC]+.*"
                << "^第[0-9]+节.*"
-               << "^[0-9]+\\.[\\s\\S]+"
-               << "^[0-9]+[、．.].*"
                << "^卷[0-9一二三四五六七八九十]+.*"
                << "^Volume\\s+\\d+.*"
                << "^Vol\\.[\\s\\S]+";
@@ -22,7 +20,6 @@ QList<Chapter> DirectoryParser::parse(const QStringList& lines)
 {
     QList<Chapter> chapters;
     int chapterIndex = 0;
-    int currentStartLine = 0;
 
     for (int i = 0; i < lines.size(); ++i) {
         const QString& line = lines.at(i).trimmed();
@@ -39,7 +36,6 @@ QList<Chapter> DirectoryParser::parse(const QStringList& lines)
             chapters.append(ch);
 
             ++chapterIndex;
-            currentStartLine = i;
         }
     }
 
@@ -65,6 +61,10 @@ bool DirectoryParser::isChapterTitle(const QString& line) const
         return false;
     }
 
+    if (isLikelyNumericHeading(line)) {
+        return true;
+    }
+
     for (const QString& pattern : m_patterns) {
         QRegularExpression regex(pattern);
         if (regex.match(line).hasMatch()) {
@@ -73,6 +73,26 @@ bool DirectoryParser::isChapterTitle(const QString& line) const
     }
 
     return false;
+}
+
+bool DirectoryParser::isLikelyNumericHeading(const QString& line) const
+{
+    const QString trimmed = line.trimmed();
+    if (trimmed.length() < 2 || trimmed.length() > 40) {
+        return false;
+    }
+
+    static const QRegularExpression numericHeadingRegex("^\\d{1,4}[、．.](?!\\d)\\s*\\S.*$");
+    if (!numericHeadingRegex.match(trimmed).hasMatch()) {
+        return false;
+    }
+
+    static const QRegularExpression sentencePunctuationRegex("[，。！？；：,!?;:]");
+    if (sentencePunctuationRegex.match(trimmed).hasMatch()) {
+        return false;
+    }
+
+    return true;
 }
 
 QString DirectoryParser::extractChapterNumber(const QString& line) const

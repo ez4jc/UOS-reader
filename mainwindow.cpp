@@ -18,10 +18,10 @@
 #include <QListWidget>
 #include <QSplitter>
 #include <QDebug>
+#include <QAbstractTextDocumentLayout>
 #include <QWheelEvent>
-#include <QCoreApplication>
 #include <QScrollBar>
-#include <QTimer>
+#include <QTextBlock>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -39,7 +39,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_isDragging(false)
     , m_isChangingChapter(false)
 {
-    setWindowFlags(Qt::FramelessWindowHint);
+    setWindowFlags(Qt::Window);
     setupUi();
     createTitleButtons();
 
@@ -186,11 +186,13 @@ void MainWindow::createTitleButtons()
     m_minimizeButton = new QPushButton(this);
     m_minimizeButton->setText("─");
     m_minimizeButton->setFixedSize(30, 30);
+    m_minimizeButton->hide();
     connect(m_minimizeButton, &QPushButton::clicked, this, &MainWindow::onMinimizeButtonClicked);
 
     m_closeButton = new QPushButton(this);
     m_closeButton->setText("×");
     m_closeButton->setFixedSize(30, 30);
+    m_closeButton->hide();
     connect(m_closeButton, &QPushButton::clicked, this, &MainWindow::onCloseButtonClicked);
 }
 
@@ -200,7 +202,7 @@ void MainWindow::onMinimizeButtonClicked()
         exitTransparentMode();
     }
 
-    setWindowState(windowState() | Qt::WindowMinimized);
+    setWindowState((windowState() & ~Qt::WindowActive) | Qt::WindowMinimized);
     showMinimized();
 }
 
@@ -332,7 +334,7 @@ void MainWindow::enterTransparentMode()
 {
     m_isTransparent = true;
     setAttribute(Qt::WA_TranslucentBackground);
-    setWindowFlags(windowFlags() | Qt::FramelessWindowHint);
+    setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     
     m_textBrowser->setStyleSheet(
         "QTextBrowser {"
@@ -360,7 +362,7 @@ void MainWindow::exitTransparentMode()
 {
     m_isTransparent = false;
     setAttribute(Qt::WA_TranslucentBackground, false);
-    setWindowFlags(windowFlags() & ~Qt::WindowStaysOnTopHint);
+    setWindowFlags(Qt::Window);
     
     menuBar()->show();
     menuBar()->setStyleSheet("");
@@ -379,7 +381,8 @@ void MainWindow::exitTransparentMode()
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
     if ((watched == m_textBrowser || watched == m_textBrowser->viewport()) &&
-        event->type() == QEvent::Wheel) {
+        event->type() == QEvent::Wheel &&
+        m_isTransparent) {
         scrollTextBrowser(static_cast<QWheelEvent*>(event));
         return true;
     }
@@ -389,27 +392,36 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 
 void MainWindow::mousePressEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton) {
+    if (m_isTransparent && event->button() == Qt::LeftButton) {
         m_isDragging = true;
         m_dragPosition = event->globalPos() - frameGeometry().topLeft();
         event->accept();
+        return;
     }
+
+    QMainWindow::mousePressEvent(event);
 }
 
 void MainWindow::mouseMoveEvent(QMouseEvent *event)
 {
-    if (event->buttons() & Qt::LeftButton && m_isDragging) {
+    if (m_isTransparent && (event->buttons() & Qt::LeftButton) && m_isDragging) {
         move(event->globalPos() - m_dragPosition);
         event->accept();
+        return;
     }
+
+    QMainWindow::mouseMoveEvent(event);
 }
 
 void MainWindow::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton) {
+    if (m_isTransparent && event->button() == Qt::LeftButton) {
         m_isDragging = false;
         event->accept();
+        return;
     }
+
+    QMainWindow::mouseReleaseEvent(event);
 }
 
 void MainWindow::wheelEvent(QWheelEvent *event)
@@ -460,26 +472,46 @@ void MainWindow::onShortcutActivated(const QString& name)
 
 void MainWindow::onChapterSelected(int index)
 {
-    if (index < 0) return;
+    scrollToChapter(index);
+}
 
-    m_currentChapter = index;
-    const bool wasChangingChapter = m_isChangingChapter;
+void MainWindow::scrollToChapter(int index)
+{
+    const QList<Chapter> chapters = m_textReader->getChapters();
+    if (index < 0 || index >= chapters.size() || !m_textBrowser->document()) {
+        return;
+    }
+
+    const Chapter& chapter = chapters.at(index);
+    QTextBlock block = m_textBrowser->document()->findBlockByLineNumber(chapter.startLine);
+    if (!block.isValid()) {
+        return;
+    }
+
     m_isChangingChapter = true;
-    QString content = m_textReader->getChapterContent(index);
-    m_textBrowser->setPlainText(content);
-    m_textBrowser->verticalScrollBar()->setValue(0);
-    m_isChangingChapter = wasChangingChapter;
+    m_currentChapter = index;
+
+    QTextCursor cursor(block);
+    m_textBrowser->setTextCursor(cursor);
+    if (QAbstractTextDocumentLayout* layout = m_textBrowser->document()->documentLayout()) {
+        const QRectF blockRect = layout->blockBoundingRect(block);
+        m_textBrowser->verticalScrollBar()->setValue(static_cast<int>(blockRect.top()));
+    } else {
+        m_textBrowser->ensureCursorVisible();
+    }
+    m_chapterList->setCurrentRow(index);
 
     m_settings->setLastChapter(index);
-    m_settings->setLastScrollPos(0);
+    m_settings->setLastScrollPos(m_textBrowser->verticalScrollBar()->value());
     m_settings->sync();
 
     statusBar()->showMessage(QString("第 %1 章").arg(index + 1));
+    m_isChangingChapter = false;
 }
 
 void MainWindow::scrollTextBrowser(QWheelEvent *event)
 {
-    if (!m_textBrowser || !m_textReader->isLoaded()) {
+    if (!m_textBrowser) {
         QMainWindow::wheelEvent(event);
         return;
     }
@@ -507,21 +539,6 @@ void MainWindow::scrollTextBrowser(QWheelEvent *event)
 
     if (nextValue != previousValue) {
         scrollBar->setValue(nextValue);
-        event->accept();
-        return;
-    }
-
-    if (deltaY < 0) {
-        onNextChapter();
-    } else if (deltaY > 0) {
-        const int previousChapter = m_currentChapter;
-        onPrevChapter();
-        if (m_currentChapter != previousChapter) {
-            QScrollBar* previousChapterScrollBar = m_textBrowser->verticalScrollBar();
-            const int targetValue = qMax(previousChapterScrollBar->minimum(),
-                                         previousChapterScrollBar->maximum() - previousChapterScrollBar->pageStep());
-            previousChapterScrollBar->setValue(targetValue);
-        }
     }
 
     event->accept();
@@ -534,13 +551,15 @@ void MainWindow::onTextBrowserScroll(int value)
     }
 
     m_settings->setLastScrollPos(value);
-    QScrollBar* scrollBar = m_textBrowser->verticalScrollBar();
-    if (value >= scrollBar->maximum() - 10) {
-        m_isChangingChapter = true;
-        QTimer::singleShot(100, this, [this]() {
-            onNextChapter();
-            m_isChangingChapter = false;
-        });
+
+    const QTextCursor cursor = m_textBrowser->cursorForPosition(QPoint(0, 0));
+    const int visibleLine = cursor.block().blockNumber();
+    const int chapterIndex = chapterIndexForLine(visibleLine);
+    if (chapterIndex >= 0 && chapterIndex != m_currentChapter) {
+        m_currentChapter = chapterIndex;
+        m_chapterList->setCurrentRow(chapterIndex);
+        m_settings->setLastChapter(chapterIndex);
+        statusBar()->showMessage(QString("第 %1 章").arg(chapterIndex + 1));
     }
 }
 
@@ -548,22 +567,14 @@ void MainWindow::onNextChapter()
 {
     QList<Chapter> chapters = m_textReader->getChapters();
     if (m_currentChapter < chapters.size() - 1) {
-        m_isChangingChapter = true;
-        m_currentChapter++;
-        m_chapterList->setCurrentRow(m_currentChapter);
-        onChapterSelected(m_currentChapter);
-        m_isChangingChapter = false;
+        scrollToChapter(m_currentChapter + 1);
     }
 }
 
 void MainWindow::onPrevChapter()
 {
     if (m_currentChapter > 0) {
-        m_isChangingChapter = true;
-        m_currentChapter--;
-        m_chapterList->setCurrentRow(m_currentChapter);
-        onChapterSelected(m_currentChapter);
-        m_isChangingChapter = false;
+        scrollToChapter(m_currentChapter - 1);
     }
 }
 
@@ -571,10 +582,12 @@ void MainWindow::onFileLoaded(const QString& fileName)
 {
     setWindowTitle(fileName + " - 阅读器");
     updateChapterList();
+    m_textBrowser->setPlainText(m_textReader->getContent());
 
     m_settings->setLastFile(fileName);
 
     int lastChapter = m_settings->getLastChapter();
+    int lastScrollPos = m_settings->getLastScrollPos();
     QList<Chapter> chapters = m_textReader->getChapters();
     if (!chapters.isEmpty()) {
         if (lastChapter >= 0 && lastChapter < chapters.size()) {
@@ -582,7 +595,10 @@ void MainWindow::onFileLoaded(const QString& fileName)
         } else {
             m_currentChapter = 0;
         }
-        onChapterSelected(m_currentChapter);
+        scrollToChapter(m_currentChapter);
+        if (lastScrollPos > 0) {
+            m_textBrowser->verticalScrollBar()->setValue(lastScrollPos);
+        }
     }
 
     statusBar()->showMessage("文件加载成功");
@@ -618,4 +634,16 @@ void MainWindow::closeEvent(QCloseEvent *event)
 {
     Q_UNUSED(event);
     m_tray->hide();
+}
+
+int MainWindow::chapterIndexForLine(int lineNumber) const
+{
+    const QList<Chapter> chapters = m_textReader->getChapters();
+    for (int i = chapters.size() - 1; i >= 0; --i) {
+        if (lineNumber >= chapters.at(i).startLine) {
+            return i;
+        }
+    }
+
+    return chapters.isEmpty() ? -1 : 0;
 }

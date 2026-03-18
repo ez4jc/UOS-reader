@@ -23,6 +23,7 @@ public:
 
 private:
     bool isChapterTitle(const QString& line) const;
+    bool isLikelyNumericHeading(const QString& line) const;
     QString extractChapterNumber(const QString& line) const;
 
     QStringList m_patterns;

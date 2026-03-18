@@ -63,12 +63,14 @@ private:
     void createMenuBar();
     void createToolBar();
     void createTitleButtons();
+    int chapterIndexForLine(int lineNumber) const;
     void registerShortcuts();
     void updateHideWindowShortcut();
     void updateAppearance();
     void updateChapterList();
     void enterTransparentMode();
     void exitTransparentMode();
+    void scrollToChapter(int index);
     void scrollTextBrowser(QWheelEvent *event);
 
     QTextBrowser* m_textBrowser;
