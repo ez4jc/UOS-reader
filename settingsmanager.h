@@ -33,6 +33,13 @@ public:
     bool getAutoChapterDetection() const;
     void setAutoChapterDetection(bool enabled);
 
+    QString getLastFile() const;
+    void setLastFile(const QString& file);
+    int getLastChapter() const;
+    void setLastChapter(int chapter);
+    int getLastScrollPos() const;
+    void setLastScrollPos(int pos);
+
     void sync();
 
 signals:

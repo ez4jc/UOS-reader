@@ -36,7 +36,7 @@ void SettingsDialog::setupUi()
 
     QGroupBox* shortcutGroup = new QGroupBox("快捷键设置", this);
     shortcutGroup->setObjectName("shortcutGroup");
-    QGridLayout* shortcutLayout = new QGridLayout(shortcutGroup);
+    new QGridLayout(shortcutGroup);
 
     createShortcutRow("透明背景切换", "ToggleTransparency");
     createShortcutRow("隐藏窗口", "HideWindow");
@@ -189,7 +189,14 @@ void SettingsDialog::saveSettings()
     QMapIterator<QString, KeyCaptureButton*> it(m_shortcutButtons);
     while (it.hasNext()) {
         it.next();
-        settings->setShortcut(it.key(), m_shortcutButtons.value(it.key())->text());
+        QString shortcut = m_shortcutEdits.value(it.key())->text().trimmed();
+        if (shortcut.isEmpty()) {
+            shortcut = m_shortcutButtons.value(it.key())->text().trimmed();
+        }
+        if (shortcut == "请按下快捷键") {
+            shortcut.clear();
+        }
+        settings->setShortcut(it.key(), shortcut);
     }
 
     settings->setBackgroundOpacity(m_opacitySlider->value());
@@ -222,10 +229,12 @@ void SettingsDialog::onCancel()
 KeyCaptureButton::KeyCaptureButton(QWidget *parent)
     : QPushButton(parent)
     , m_shortcutName("")
+    , m_originalShortcut("")
     , m_capturing(false)
 {
     setText("点击设置");
     setMaximumWidth(100);
+    setFocusPolicy(Qt::StrongFocus);
 }
 
 void KeyCaptureButton::setShortcutName(const QString& name)
@@ -238,11 +247,19 @@ QString KeyCaptureButton::getShortcutName() const
     return m_shortcutName;
 }
 
+void KeyCaptureButton::focusInEvent(QFocusEvent *event)
+{
+    Q_UNUSED(event);
+    m_originalShortcut = text();
+    m_capturing = true;
+    setText("请按下快捷键");
+}
+
 void KeyCaptureButton::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
         m_capturing = false;
-        setText("点击设置");
+        setText(m_originalShortcut);
         return;
     }
 
@@ -274,8 +291,8 @@ void KeyCaptureButton::keyPressEvent(QKeyEvent *event)
 void KeyCaptureButton::focusOutEvent(QFocusEvent *event)
 {
     Q_UNUSED(event);
-    if (m_capturing) {
+    if (m_capturing && text() == "请按下快捷键") {
         m_capturing = false;
-        setText("点击设置");
+        setText(m_originalShortcut);
     }
 }

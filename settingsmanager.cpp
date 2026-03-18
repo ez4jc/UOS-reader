@@ -132,6 +132,36 @@ void SettingsManager::setAutoChapterDetection(bool enabled)
     emit settingsChanged();
 }
 
+QString SettingsManager::getLastFile() const
+{
+    return m_settings->value("Progress/LastFile").toString();
+}
+
+void SettingsManager::setLastFile(const QString& file)
+{
+    m_settings->setValue("Progress/LastFile", file);
+}
+
+int SettingsManager::getLastChapter() const
+{
+    return m_settings->value("Progress/LastChapter", 0).toInt();
+}
+
+void SettingsManager::setLastChapter(int chapter)
+{
+    m_settings->setValue("Progress/LastChapter", chapter);
+}
+
+int SettingsManager::getLastScrollPos() const
+{
+    return m_settings->value("Progress/LastScrollPos", 0).toInt();
+}
+
+void SettingsManager::setLastScrollPos(int pos)
+{
+    m_settings->setValue("Progress/LastScrollPos", pos);
+}
+
 void SettingsManager::sync()
 {
     m_settings->sync();

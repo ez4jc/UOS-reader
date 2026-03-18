@@ -11,16 +11,19 @@
 #include <QCloseEvent>
 #include <QPoint>
 #include <QPushButton>
+#include <QObject>
 
 class TextReader;
 class SettingsManager;
 class ShortcutsManager;
 class SystemTray;
 class SettingsDialog;
+class GlobalHotkey;
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "com.zgyd.Reader")
 
 public:
     MainWindow(QWidget *parent = nullptr);
@@ -28,9 +31,14 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
+
+public slots:
+    Q_SCRIPTABLE void ToggleVisibility();
 
 private slots:
     void onOpenFile();
@@ -48,6 +56,7 @@ private slots:
     void onRestoreFromTray();
     void onCloseButtonClicked();
     void onMinimizeButtonClicked();
+    void onTextBrowserScroll(int value);
 
 private:
     void setupUi();
@@ -55,10 +64,12 @@ private:
     void createToolBar();
     void createTitleButtons();
     void registerShortcuts();
+    void updateHideWindowShortcut();
     void updateAppearance();
     void updateChapterList();
     void enterTransparentMode();
     void exitTransparentMode();
+    void scrollTextBrowser(QWheelEvent *event);
 
     QTextBrowser* m_textBrowser;
     QListWidget* m_chapterList;
@@ -68,11 +79,13 @@ private:
     TextReader* m_textReader;
     SettingsManager* m_settings;
     ShortcutsManager* m_shortcuts;
+    GlobalHotkey* m_hideHotkey;
     SystemTray* m_tray;
 
     bool m_isTransparent;
     int m_currentChapter;
     bool m_isDragging;
+    bool m_isChangingChapter;
     QPoint m_dragPosition;
 };
 

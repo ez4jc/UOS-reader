@@ -59,11 +59,13 @@ signals:
     void shortcutCaptured(const QString& name, const QString& shortcut);
 
 protected:
+    void focusInEvent(QFocusEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void focusOutEvent(QFocusEvent *event) override;
 
 private:
     QString m_shortcutName;
+    QString m_originalShortcut;
     bool m_capturing;
 };
 

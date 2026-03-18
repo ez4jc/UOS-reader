@@ -1,4 +1,4 @@
-QT += core gui widgets
+QT += core gui widgets dbus
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -16,6 +16,7 @@ SOURCES += \
     directoryparser.cpp \
     settingsmanager.cpp \
     shortcutsmanager.cpp \
+    globalhotkey.cpp \
     systemtray.cpp \
     settingsdialog.cpp
 
@@ -25,8 +26,11 @@ HEADERS += \
     directoryparser.h \
     settingsmanager.h \
     shortcutsmanager.h \
+    globalhotkey.h \
     systemtray.h \
     settingsdialog.h
+
+unix: LIBS += -lX11
 
 qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin

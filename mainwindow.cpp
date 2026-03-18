@@ -4,17 +4,24 @@
 #include "shortcutsmanager.h"
 #include "systemtray.h"
 #include "settingsdialog.h"
+#include "globalhotkey.h"
 
+#include <QDBusConnection>
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
 #include <QToolBar>
 #include <QStatusBar>
 #include <QFileDialog>
+#include <QFile>
 #include <QMessageBox>
 #include <QListWidget>
 #include <QSplitter>
 #include <QDebug>
+#include <QWheelEvent>
+#include <QCoreApplication>
+#include <QScrollBar>
+#include <QTimer>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -25,10 +32,12 @@ MainWindow::MainWindow(QWidget *parent)
     , m_textReader(nullptr)
     , m_settings(nullptr)
     , m_shortcuts(nullptr)
+    , m_hideHotkey(nullptr)
     , m_tray(nullptr)
     , m_isTransparent(false)
     , m_currentChapter(0)
     , m_isDragging(false)
+    , m_isChangingChapter(false)
 {
     setWindowFlags(Qt::FramelessWindowHint);
     setupUi();
@@ -37,12 +46,17 @@ MainWindow::MainWindow(QWidget *parent)
     m_textReader = new TextReader(this);
     m_settings = SettingsManager::instance();
     m_shortcuts = new ShortcutsManager(this);
+    m_hideHotkey = new GlobalHotkey(this);
     m_tray = new SystemTray(this);
+
+    QDBusConnection::sessionBus().registerService("com.zgyd.Reader");
+    QDBusConnection::sessionBus().registerObject("/Reader", this, QDBusConnection::ExportScriptableSlots);
 
     m_tray->setParentWindow(this);
 
     connect(m_tray, &SystemTray::requestShowWindow, this, &MainWindow::onRestoreFromTray);
     connect(m_tray, &SystemTray::requestQuit, this, &MainWindow::onQuit);
+    connect(m_hideHotkey, &GlobalHotkey::activated, this, &MainWindow::onHideToTray);
 
     connect(m_textReader, &TextReader::fileLoaded, this, &MainWindow::onFileLoaded);
     connect(m_textReader, &TextReader::loadError, this, &MainWindow::onLoadError);
@@ -52,6 +66,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(m_settings, &SettingsManager::settingsChanged,
             this, &MainWindow::onSettingsChanged);
+
+    QString lastFile = m_settings->getLastFile();
+    if (!lastFile.isEmpty() && QFile::exists(lastFile)) {
+        m_textReader->loadFile(lastFile);
+        m_currentChapter = m_settings->getLastChapter();
+    }
 
     setWindowTitle("阅读器");
     resize(900, 600);
@@ -78,6 +98,10 @@ void MainWindow::setupUi()
     m_textBrowser = new QTextBrowser(this);
     m_textBrowser->setReadOnly(true);
     m_textBrowser->setOpenExternalLinks(false);
+    m_textBrowser->installEventFilter(this);
+    m_textBrowser->viewport()->installEventFilter(this);
+    connect(m_textBrowser->verticalScrollBar(), SIGNAL(valueChanged(int)),
+            this, SLOT(onTextBrowserScroll(int)));
     splitter->addWidget(m_textBrowser);
 
     splitter->setStretchFactor(0, 1);
@@ -162,37 +186,11 @@ void MainWindow::createTitleButtons()
     m_minimizeButton = new QPushButton(this);
     m_minimizeButton->setText("─");
     m_minimizeButton->setFixedSize(30, 30);
-    m_minimizeButton->setStyleSheet(
-        "QPushButton {"
-        "  background-color: #ffc107;"
-        "  color: white;"
-        "  border: none;"
-        "  border-radius: 15px;"
-        "  font-size: 16px;"
-        "  font-weight: bold;"
-        "}"
-        "QPushButton:hover {"
-        "  background-color: #ff9800;"
-        "}"
-    );
     connect(m_minimizeButton, &QPushButton::clicked, this, &MainWindow::onMinimizeButtonClicked);
 
     m_closeButton = new QPushButton(this);
     m_closeButton->setText("×");
     m_closeButton->setFixedSize(30, 30);
-    m_closeButton->setStyleSheet(
-        "QPushButton {"
-        "  background-color: #ff4d4d;"
-        "  color: white;"
-        "  border: none;"
-        "  border-radius: 15px;"
-        "  font-size: 18px;"
-        "  font-weight: bold;"
-        "}"
-        "QPushButton:hover {"
-        "  background-color: #ff0000;"
-        "}"
-    );
     connect(m_closeButton, &QPushButton::clicked, this, &MainWindow::onCloseButtonClicked);
 }
 
@@ -201,6 +199,8 @@ void MainWindow::onMinimizeButtonClicked()
     if (m_isTransparent) {
         exitTransparentMode();
     }
+
+    setWindowState(windowState() | Qt::WindowMinimized);
     showMinimized();
 }
 
@@ -216,13 +216,32 @@ void MainWindow::registerShortcuts()
 {
     m_shortcuts->registerShortcut(this, "OpenFile", m_settings->getShortcut("OpenFile"));
     m_shortcuts->registerShortcut(this, "ToggleTransparency", m_settings->getShortcut("ToggleTransparency"));
-    m_shortcuts->registerShortcut(this, "HideWindow", m_settings->getShortcut("HideWindow"));
     m_shortcuts->registerShortcut(this, "Quit", m_settings->getShortcut("Quit"));
     m_shortcuts->registerShortcut(this, "NextChapter", m_settings->getShortcut("NextChapter"));
     m_shortcuts->registerShortcut(this, "PrevChapter", m_settings->getShortcut("PrevChapter"));
+    updateHideWindowShortcut();
 
     connect(m_shortcuts, &ShortcutsManager::shortcutActivated,
-            this, &MainWindow::onShortcutActivated);
+            this, &MainWindow::onShortcutActivated,
+            Qt::UniqueConnection);
+}
+
+void MainWindow::updateHideWindowShortcut()
+{
+    if (!m_hideHotkey || !m_shortcuts) {
+        return;
+    }
+
+    const QString sequence = m_settings->getShortcut("HideWindow");
+    m_hideHotkey->setActivationCommand("/usr/bin/qdbus com.zgyd.Reader /Reader com.zgyd.Reader.ToggleVisibility");
+    if (m_hideHotkey->isAvailable()) {
+        m_shortcuts->registerShortcut(this, "HideWindow", QString());
+        m_hideHotkey->setShortcut(sequence);
+        return;
+    }
+
+    m_hideHotkey->setShortcut(QString());
+    m_shortcuts->registerShortcut(this, "HideWindow", sequence);
 }
 
 void MainWindow::updateAppearance()
@@ -295,7 +314,7 @@ void MainWindow::onShowSettings()
     SettingsDialog dialog(this);
     if (dialog.exec() == QDialog::Accepted) {
         m_shortcuts->reloadFromSettings();
-        registerShortcuts();
+        updateHideWindowShortcut();
         updateAppearance();
     }
 }
@@ -344,6 +363,7 @@ void MainWindow::exitTransparentMode()
     setWindowFlags(windowFlags() & ~Qt::WindowStaysOnTopHint);
     
     menuBar()->show();
+    menuBar()->setStyleSheet("");
     QToolBar* toolbar = findChild<QToolBar*>("mainToolbar");
     if (toolbar) toolbar->show();
     statusBar()->show();
@@ -351,8 +371,20 @@ void MainWindow::exitTransparentMode()
     m_closeButton->show();
     m_minimizeButton->show();
     
+    setStyleSheet("");
     updateAppearance();
     show();
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if ((watched == m_textBrowser || watched == m_textBrowser->viewport()) &&
+        event->type() == QEvent::Wheel) {
+        scrollTextBrowser(static_cast<QWheelEvent*>(event));
+        return true;
+    }
+
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::mousePressEvent(QMouseEvent *event)
@@ -380,14 +412,33 @@ void MainWindow::mouseReleaseEvent(QMouseEvent *event)
     }
 }
 
+void MainWindow::wheelEvent(QWheelEvent *event)
+{
+    if (m_isTransparent && m_textBrowser) {
+        scrollTextBrowser(event);
+        return;
+    }
+
+    QMainWindow::wheelEvent(event);
+}
+
+void MainWindow::ToggleVisibility()
+{
+    onHideToTray();
+}
+
 void MainWindow::onHideToTray()
 {
-    if (m_isTransparent) {
-        exitTransparentMode();
+    if (isHidden()) {
+        onRestoreFromTray();
+    } else {
+        if (m_isTransparent) {
+            exitTransparentMode();
+        }
+        hide();
+        m_tray->show();
+        m_tray->showMessage("阅读器已隐藏", "点击托盘图标恢复");
     }
-    hide();
-    m_tray->show();
-    m_tray->showMessage("阅读器已隐藏", "点击托盘图标恢复");
 }
 
 void MainWindow::onShortcutActivated(const QString& name)
@@ -412,28 +463,107 @@ void MainWindow::onChapterSelected(int index)
     if (index < 0) return;
 
     m_currentChapter = index;
+    const bool wasChangingChapter = m_isChangingChapter;
+    m_isChangingChapter = true;
     QString content = m_textReader->getChapterContent(index);
     m_textBrowser->setPlainText(content);
+    m_textBrowser->verticalScrollBar()->setValue(0);
+    m_isChangingChapter = wasChangingChapter;
+
+    m_settings->setLastChapter(index);
+    m_settings->setLastScrollPos(0);
+    m_settings->sync();
 
     statusBar()->showMessage(QString("第 %1 章").arg(index + 1));
+}
+
+void MainWindow::scrollTextBrowser(QWheelEvent *event)
+{
+    if (!m_textBrowser || !m_textReader->isLoaded()) {
+        QMainWindow::wheelEvent(event);
+        return;
+    }
+
+    QScrollBar* scrollBar = m_textBrowser->verticalScrollBar();
+    if (!scrollBar) {
+        event->ignore();
+        return;
+    }
+
+    int deltaY = event->pixelDelta().y();
+    if (deltaY == 0) {
+        deltaY = (event->angleDelta().y() / 120) * scrollBar->singleStep() * 3;
+    }
+
+    if (deltaY == 0) {
+        event->ignore();
+        return;
+    }
+
+    const int previousValue = scrollBar->value();
+    const int nextValue = qBound(scrollBar->minimum(),
+                                 previousValue - deltaY,
+                                 scrollBar->maximum());
+
+    if (nextValue != previousValue) {
+        scrollBar->setValue(nextValue);
+        event->accept();
+        return;
+    }
+
+    if (deltaY < 0) {
+        onNextChapter();
+    } else if (deltaY > 0) {
+        const int previousChapter = m_currentChapter;
+        onPrevChapter();
+        if (m_currentChapter != previousChapter) {
+            QScrollBar* previousChapterScrollBar = m_textBrowser->verticalScrollBar();
+            const int targetValue = qMax(previousChapterScrollBar->minimum(),
+                                         previousChapterScrollBar->maximum() - previousChapterScrollBar->pageStep());
+            previousChapterScrollBar->setValue(targetValue);
+        }
+    }
+
+    event->accept();
+}
+
+void MainWindow::onTextBrowserScroll(int value)
+{
+    if (m_isChangingChapter) {
+        return;
+    }
+
+    m_settings->setLastScrollPos(value);
+    QScrollBar* scrollBar = m_textBrowser->verticalScrollBar();
+    if (value >= scrollBar->maximum() - 10) {
+        m_isChangingChapter = true;
+        QTimer::singleShot(100, this, [this]() {
+            onNextChapter();
+            m_isChangingChapter = false;
+        });
+    }
 }
 
 void MainWindow::onNextChapter()
 {
     QList<Chapter> chapters = m_textReader->getChapters();
     if (m_currentChapter < chapters.size() - 1) {
+        m_isChangingChapter = true;
         m_currentChapter++;
         m_chapterList->setCurrentRow(m_currentChapter);
         onChapterSelected(m_currentChapter);
+        m_isChangingChapter = false;
     }
 }
 
 void MainWindow::onPrevChapter()
 {
     if (m_currentChapter > 0) {
+        m_isChangingChapter = true;
         m_currentChapter--;
         m_chapterList->setCurrentRow(m_currentChapter);
         onChapterSelected(m_currentChapter);
+        m_isChangingChapter = false;
     }
 }
 
@@ -442,10 +572,17 @@ void MainWindow::onFileLoaded(const QString& fileName)
     setWindowTitle(fileName + " - 阅读器");
     updateChapterList();
 
+    m_settings->setLastFile(fileName);
+
+    int lastChapter = m_settings->getLastChapter();
     QList<Chapter> chapters = m_textReader->getChapters();
     if (!chapters.isEmpty()) {
-        m_currentChapter = 0;
-        onChapterSelected(0);
+        if (lastChapter >= 0 && lastChapter < chapters.size()) {
+            m_currentChapter = lastChapter;
+        } else {
+            m_currentChapter = 0;
+        }
+        onChapterSelected(m_currentChapter);
     }
 
     statusBar()->showMessage("文件加载成功");

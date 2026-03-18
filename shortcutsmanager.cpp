@@ -14,15 +14,20 @@ void ShortcutsManager::registerShortcut(QWidget* widget, const QString& name, co
         QShortcut* oldShortcut = m_shortcuts.value(name);
         oldShortcut->disconnect();
         oldShortcut->deleteLater();
+        m_shortcuts.remove(name);
+    }
+
+    m_shortcutNames.insert(name, sequence);
+    if (sequence.trimmed().isEmpty()) {
+        return;
     }
 
     QKeySequence keySeq(sequence);
     QShortcut* shortcut = new QShortcut(keySeq, widget);
-
+    shortcut->setContext(Qt::ApplicationShortcut);
     connect(shortcut, &QShortcut::activated, this, &ShortcutsManager::onShortcutActivated);
 
     m_shortcuts.insert(name, shortcut);
-    m_shortcutNames.insert(name, sequence);
 }
 
 void ShortcutsManager::unregisterAll()
@@ -40,14 +45,14 @@ void ShortcutsManager::reloadFromSettings()
 {
     SettingsManager* settings = SettingsManager::instance();
 
-    QMapIterator<QString, QString> it(m_shortcutNames);
-    while (it.hasNext()) {
-        it.next();
-        QString newSequence = settings->getShortcut(it.key());
-        if (m_shortcuts.contains(it.key())) {
-            QShortcut* shortcut = m_shortcuts.value(it.key());
+    const QStringList shortcutNames = m_shortcutNames.keys();
+    for (const QString& name : shortcutNames) {
+        const QString newSequence = settings->getShortcut(name);
+        if (m_shortcuts.contains(name)) {
+            QShortcut* shortcut = m_shortcuts.value(name);
             shortcut->setKey(QKeySequence(newSequence));
         }
+        m_shortcutNames.insert(name, newSequence);
     }
 }
 
