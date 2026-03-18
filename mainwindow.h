@@ -10,6 +10,7 @@
 #include <QListWidget>
 #include <QCloseEvent>
 #include <QPoint>
+#include <QRect>
 #include <QPushButton>
 #include <QObject>
 
@@ -89,6 +90,7 @@ private:
     bool m_isDragging;
     bool m_isChangingChapter;
     QPoint m_dragPosition;
+    QRect m_lastVisibleGeometry;
 };
 
 #endif

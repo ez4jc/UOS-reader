@@ -38,6 +38,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_currentChapter(0)
     , m_isDragging(false)
     , m_isChangingChapter(false)
+    , m_lastVisibleGeometry()
 {
     setWindowFlags(Qt::Window);
     setupUi();
@@ -75,6 +76,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     setWindowTitle("阅读器");
     resize(900, 600);
+    m_lastVisibleGeometry = geometry();
 }
 
 MainWindow::~MainWindow()
@@ -263,33 +265,25 @@ void MainWindow::updateHideWindowShortcut()
 
 void MainWindow::updateAppearance()
 {
-    int opacity = m_settings->getBackgroundOpacity();
     int fontSize = m_settings->getFontSize();
     QString fontColor = m_settings->getFontColor();
     QString fontFamily = m_settings->getFontFamily();
 
     QString style = QString(
         "QTextBrowser {"
-        "  background-color: rgba(255, 255, 255, %1);"
-        "  color: %2;"
-        "  font-family: %3;"
-        "  font-size: %4px;"
+        "  background-color: white;"
+        "  color: %1;"
+        "  font-family: %2;"
+        "  font-size: %3px;"
         "}"
-    ).arg(opacity * 2.55).arg(fontColor).arg(fontFamily).arg(fontSize);
+    ).arg(fontColor).arg(fontFamily).arg(fontSize);
 
     m_textBrowser->setStyleSheet(style);
     m_textBrowser->setAttribute(Qt::WA_TransparentForMouseEvents, false);
     menuBar()->setAutoFillBackground(true);
     
-    if (opacity < 100) {
-        QPalette pal = palette();
-        pal.setColor(QPalette::Window, Qt::transparent);
-        setAttribute(Qt::WA_TranslucentBackground);
-        setStyleSheet("MainWindow { background: transparent; }");
-    } else {
-        setAttribute(Qt::WA_TranslucentBackground, false);
-        setStyleSheet("");
-    }
+    setAttribute(Qt::WA_TranslucentBackground, false);
+    setStyleSheet("");
 
 }
 
@@ -342,17 +336,23 @@ void MainWindow::onToggleTransparency()
 
 void MainWindow::enterTransparentMode()
 {
+    const QRect currentGeometry = geometry();
     m_isTransparent = true;
     setAttribute(Qt::WA_TranslucentBackground);
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
-    
     m_textBrowser->setStyleSheet(
-        "QTextBrowser {"
-        "  background-color: rgba(255, 255, 255, 0);"
-        "  color: #000000;"
-        "  border: none;"
-        "  padding: 10px;"
-        "}"
+        QString(
+            "QTextBrowser {"
+            "  background-color: rgba(255, 255, 255, 0);"
+            "  color: %1;"
+            "  border: none;"
+            "  padding: 10px;"
+            "  font-family: %2;"
+            "  font-size: %3px;"
+            "}"
+        ).arg(m_settings->getFontColor())
+         .arg(m_settings->getFontFamily())
+         .arg(m_settings->getFontSize())
     );
     m_textBrowser->setAttribute(Qt::WA_TransparentForMouseEvents);
     
@@ -363,17 +363,18 @@ void MainWindow::enterTransparentMode()
     m_chapterList->hide();
     
     setStyleSheet("MainWindow { background: transparent; }");
+    setGeometry(currentGeometry);
     show();
 }
 
 void MainWindow::exitTransparentMode()
 {
+    const QRect currentGeometry = geometry();
     m_isTransparent = false;
     setAttribute(Qt::WA_TranslucentBackground, false);
     setWindowFlags(Qt::Window);
-    
+
     menuBar()->show();
-    menuBar()->setStyleSheet("");
     QToolBar* toolbar = findChild<QToolBar*>("mainToolbar");
     if (toolbar) toolbar->show();
     statusBar()->show();
@@ -381,6 +382,7 @@ void MainWindow::exitTransparentMode()
     
     setStyleSheet("");
     updateAppearance();
+    setGeometry(currentGeometry);
     show();
 }
 
@@ -450,8 +452,8 @@ void MainWindow::onHideToTray()
     if (isHidden()) {
         onRestoreFromTray();
     } else {
-        if (m_isTransparent) {
-            exitTransparentMode();
+        if (!isMinimized()) {
+            m_lastVisibleGeometry = geometry();
         }
         hide();
         m_tray->show();
@@ -623,8 +625,8 @@ void MainWindow::onSettingsChanged()
 
 void MainWindow::onRestoreFromTray()
 {
-    if (m_isTransparent) {
-        exitTransparentMode();
+    if (m_lastVisibleGeometry.isValid()) {
+        setGeometry(m_lastVisibleGeometry);
     }
     show();
     activateWindow();
