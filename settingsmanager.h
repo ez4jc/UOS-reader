@@ -2,6 +2,7 @@
 #define SETTINGSMANAGER_H
 
 #include <QObject>
+#include <QRect>
 #include <QSettings>
 #include <QString>
 
@@ -39,6 +40,8 @@ public:
     void setLastChapter(int chapter);
     int getLastScrollPos() const;
     void setLastScrollPos(int pos);
+    QRect getWindowGeometry() const;
+    void setWindowGeometry(const QRect& geometry);
 
     void sync();
 

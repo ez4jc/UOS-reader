@@ -9,10 +9,12 @@
 #include <QStatusBar>
 #include <QListWidget>
 #include <QCloseEvent>
+#include <QMoveEvent>
 #include <QPoint>
 #include <QRect>
 #include <QPushButton>
 #include <QObject>
+#include <QResizeEvent>
 
 class TextReader;
 class SettingsManager;
@@ -36,6 +38,8 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void moveEvent(QMoveEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
 
 public slots:

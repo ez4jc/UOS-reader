@@ -162,6 +162,16 @@ void SettingsManager::setLastScrollPos(int pos)
     m_settings->setValue("Progress/LastScrollPos", pos);
 }
 
+QRect SettingsManager::getWindowGeometry() const
+{
+    return m_settings->value("Window/Geometry").toRect();
+}
+
+void SettingsManager::setWindowGeometry(const QRect& geometry)
+{
+    m_settings->setValue("Window/Geometry", geometry);
+}
+
 void SettingsManager::sync()
 {
     m_settings->sync();

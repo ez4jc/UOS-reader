@@ -76,8 +76,14 @@ MainWindow::MainWindow(QWidget *parent)
         m_currentChapter = m_settings->getLastChapter();
     }
 
+    const QRect savedGeometry = m_settings->getWindowGeometry();
+    if (savedGeometry.isValid()) {
+        setGeometry(savedGeometry);
+    } else {
+        resize(900, 600);
+    }
+
     setWindowTitle("阅读器");
-    resize(900, 600);
     m_lastVisibleGeometry = geometry();
 }
 
@@ -435,6 +441,28 @@ void MainWindow::mouseReleaseEvent(QMouseEvent *event)
     }
 
     QMainWindow::mouseReleaseEvent(event);
+}
+
+void MainWindow::moveEvent(QMoveEvent *event)
+{
+    QMainWindow::moveEvent(event);
+
+    if (m_settings && !m_isTransparent && isVisible() && !isMinimized()) {
+        m_settings->setWindowGeometry(geometry());
+        m_settings->sync();
+        m_lastVisibleGeometry = geometry();
+    }
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+
+    if (m_settings && !m_isTransparent && isVisible() && !isMinimized()) {
+        m_settings->setWindowGeometry(geometry());
+        m_settings->sync();
+        m_lastVisibleGeometry = geometry();
+    }
 }
 
 void MainWindow::wheelEvent(QWheelEvent *event)
