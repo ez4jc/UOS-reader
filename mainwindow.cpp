@@ -19,6 +19,7 @@
 #include <QSplitter>
 #include <QDebug>
 #include <QAbstractTextDocumentLayout>
+#include <QApplication>
 #include <QWheelEvent>
 #include <QScrollBar>
 #include <QTextBlock>
@@ -39,6 +40,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_isDragging(false)
     , m_isChangingChapter(false)
     , m_lastVisibleGeometry()
+    , m_normalGeometryBeforeTransparent()
 {
     setWindowFlags(Qt::Window);
     setupUi();
@@ -336,7 +338,8 @@ void MainWindow::onToggleTransparency()
 
 void MainWindow::enterTransparentMode()
 {
-    const QRect currentGeometry = geometry();
+    const QRect textGlobalRect(m_textBrowser->mapToGlobal(QPoint(0, 0)), m_textBrowser->size());
+    m_normalGeometryBeforeTransparent = geometry();
     m_isTransparent = true;
     setAttribute(Qt::WA_TranslucentBackground);
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
@@ -363,13 +366,13 @@ void MainWindow::enterTransparentMode()
     m_chapterList->hide();
     
     setStyleSheet("MainWindow { background: transparent; }");
-    setGeometry(currentGeometry);
     show();
+    qApp->processEvents();
+    adjustWindowToKeepTextRect(textGlobalRect);
 }
 
 void MainWindow::exitTransparentMode()
 {
-    const QRect currentGeometry = geometry();
     m_isTransparent = false;
     setAttribute(Qt::WA_TranslucentBackground, false);
     setWindowFlags(Qt::Window);
@@ -382,7 +385,9 @@ void MainWindow::exitTransparentMode()
     
     setStyleSheet("");
     updateAppearance();
-    setGeometry(currentGeometry);
+    if (m_normalGeometryBeforeTransparent.isValid()) {
+        setGeometry(m_normalGeometryBeforeTransparent);
+    }
     show();
 }
 
@@ -588,7 +593,8 @@ void MainWindow::onPrevChapter()
 
 void MainWindow::onFileLoaded(const QString& fileName)
 {
-    setWindowTitle(fileName + " - 阅读器");
+    QFileInfo fileInfo(fileName);
+    setWindowTitle(fileInfo.fileName() + " - 阅读器");
     updateChapterList();
     m_textBrowser->setPlainText(m_textReader->getContent());
 
@@ -642,6 +648,24 @@ void MainWindow::closeEvent(QCloseEvent *event)
 {
     Q_UNUSED(event);
     m_tray->hide();
+}
+
+void MainWindow::adjustWindowToKeepTextRect(const QRect& desiredGlobalRect)
+{
+    if (!m_textBrowser) {
+        return;
+    }
+
+    const QRect currentGlobalRect(m_textBrowser->mapToGlobal(QPoint(0, 0)), m_textBrowser->size());
+    const QRect currentWindowGeometry = geometry();
+
+    QRect adjustedGeometry = currentWindowGeometry;
+    adjustedGeometry.moveLeft(currentWindowGeometry.left() + (desiredGlobalRect.left() - currentGlobalRect.left()));
+    adjustedGeometry.moveTop(currentWindowGeometry.top() + (desiredGlobalRect.top() - currentGlobalRect.top()));
+    adjustedGeometry.setWidth(currentWindowGeometry.width() + (desiredGlobalRect.width() - currentGlobalRect.width()));
+    adjustedGeometry.setHeight(currentWindowGeometry.height() + (desiredGlobalRect.height() - currentGlobalRect.height()));
+
+    setGeometry(adjustedGeometry);
 }
 
 int MainWindow::chapterIndexForLine(int lineNumber) const

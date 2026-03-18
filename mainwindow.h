@@ -71,6 +71,7 @@ private:
     void updateChapterList();
     void enterTransparentMode();
     void exitTransparentMode();
+    void adjustWindowToKeepTextRect(const QRect& desiredGlobalRect);
     void scrollToChapter(int index);
     void scrollTextBrowser(QWheelEvent *event);
 
@@ -91,6 +92,7 @@ private:
     bool m_isChangingChapter;
     QPoint m_dragPosition;
     QRect m_lastVisibleGeometry;
+    QRect m_normalGeometryBeforeTransparent;
 };
 
 #endif

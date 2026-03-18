@@ -23,7 +23,7 @@ public:
     bool isLoaded() const;
 
 signals:
-    void fileLoaded(const QString& fileName);
+    void fileLoaded(const QString& filePath);
     void loadError(const QString& error);
 
 private:

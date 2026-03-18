@@ -41,7 +41,7 @@ bool TextReader::loadFile(const QString& filePath)
     m_filePath = filePath;
     m_loaded = true;
 
-    emit fileLoaded(m_fileName);
+    emit fileLoaded(m_filePath);
     return true;
 }
 
