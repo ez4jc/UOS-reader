@@ -172,6 +172,16 @@ void SettingsManager::setWindowGeometry(const QRect& geometry)
     m_settings->setValue("Window/Geometry", geometry);
 }
 
+QByteArray SettingsManager::getSavedWindowGeometry() const
+{
+    return m_settings->value("Window/SavedGeometry").toByteArray();
+}
+
+void SettingsManager::setSavedWindowGeometry(const QByteArray& geometry)
+{
+    m_settings->setValue("Window/SavedGeometry", geometry);
+}
+
 void SettingsManager::sync()
 {
     m_settings->sync();

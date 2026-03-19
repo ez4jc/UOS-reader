@@ -2,6 +2,7 @@
 #define SETTINGSMANAGER_H
 
 #include <QObject>
+#include <QByteArray>
 #include <QRect>
 #include <QSettings>
 #include <QString>
@@ -42,6 +43,8 @@ public:
     void setLastScrollPos(int pos);
     QRect getWindowGeometry() const;
     void setWindowGeometry(const QRect& geometry);
+    QByteArray getSavedWindowGeometry() const;
+    void setSavedWindowGeometry(const QByteArray& geometry);
 
     void sync();
 

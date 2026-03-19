@@ -83,11 +83,6 @@ void SystemTray::onTrayActivated(QSystemTrayIcon::ActivationReason reason)
 
 void SystemTray::onShowWindow()
 {
-    if (m_parentWindow) {
-        m_parentWindow->show();
-        m_parentWindow->activateWindow();
-        m_parentWindow->raise();
-    }
     emit requestShowWindow();
 }
 

@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QByteArray>
 #include <QTextBrowser>
 #include <QAction>
 #include <QMenuBar>
@@ -15,6 +16,8 @@
 #include <QPushButton>
 #include <QObject>
 #include <QResizeEvent>
+#include <QShowEvent>
+#include <functional>
 
 class TextReader;
 class SettingsManager;
@@ -40,6 +43,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void moveEvent(QMoveEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+    void showEvent(QShowEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
 
 public slots:
@@ -76,6 +80,15 @@ private:
     void enterTransparentMode();
     void exitTransparentMode();
     void adjustWindowToKeepTextRect(const QRect& desiredGlobalRect);
+    void applySavedWindowGeometry(const QByteArray& savedGeometry, bool showWindow);
+    void applyStableWindowGeometry(const QRect& targetGeometry, bool showWindow);
+    void alignWindowFrameTo(const QRect& targetFrameGeometry);
+    void scheduleFrameAlignment(const QRect& targetFrameGeometry, bool persistAfterAlignment);
+    void captureCurrentWindowGeometry(bool persistToSettings);
+    void scheduleGeometrySnapshot(bool persistToSettings, int delayMs = 300);
+    bool deferNormalModeTransition(const std::function<void()>& continuation);
+    void hideToTrayImmediate();
+    void persistWindowGeometry();
     void scrollToChapter(int index);
     void scrollTextBrowser(QWheelEvent *event);
 
@@ -92,10 +105,20 @@ private:
 
     bool m_isTransparent;
     int m_currentChapter;
+    int m_geometrySnapshotSerial;
+    int m_pendingTransitionSerial;
+    int m_windowRestoreSerial;
+    bool m_hasInitialGeometryCalibration;
+    bool m_hasPendingGeometrySnapshot;
     bool m_isDragging;
     bool m_isChangingChapter;
+    bool m_isApplyingWindowGeometry;
     QPoint m_dragPosition;
+    QByteArray m_lastVisibleSavedGeometry;
+    QByteArray m_normalGeometryBeforeTransparentData;
     QRect m_lastVisibleGeometry;
+    QRect m_lastVisibleFrameGeometry;
+    QRect m_normalFrameGeometryBeforeTransparent;
     QRect m_normalGeometryBeforeTransparent;
 };
 

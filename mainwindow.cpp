@@ -20,6 +20,7 @@
 #include <QDebug>
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
+#include <QTimer>
 #include <QWheelEvent>
 #include <QScrollBar>
 #include <QTextBlock>
@@ -37,9 +38,19 @@ MainWindow::MainWindow(QWidget *parent)
     , m_tray(nullptr)
     , m_isTransparent(false)
     , m_currentChapter(0)
+    , m_geometrySnapshotSerial(0)
+    , m_pendingTransitionSerial(0)
+    , m_windowRestoreSerial(0)
+    , m_hasInitialGeometryCalibration(false)
+    , m_hasPendingGeometrySnapshot(false)
     , m_isDragging(false)
     , m_isChangingChapter(false)
+    , m_isApplyingWindowGeometry(false)
+    , m_lastVisibleSavedGeometry()
+    , m_normalGeometryBeforeTransparentData()
     , m_lastVisibleGeometry()
+    , m_lastVisibleFrameGeometry()
+    , m_normalFrameGeometryBeforeTransparent()
     , m_normalGeometryBeforeTransparent()
 {
     setWindowFlags(Qt::Window);
@@ -76,15 +87,22 @@ MainWindow::MainWindow(QWidget *parent)
         m_currentChapter = m_settings->getLastChapter();
     }
 
-    const QRect savedGeometry = m_settings->getWindowGeometry();
-    if (savedGeometry.isValid()) {
-        setGeometry(savedGeometry);
+    const QByteArray savedWindowGeometry = m_settings->getSavedWindowGeometry();
+    if (!savedWindowGeometry.isEmpty()) {
+        restoreGeometry(savedWindowGeometry);
     } else {
-        resize(900, 600);
+        const QRect savedGeometry = m_settings->getWindowGeometry();
+        if (savedGeometry.isValid()) {
+            setGeometry(savedGeometry);
+        } else {
+            resize(900, 600);
+        }
     }
 
     setWindowTitle("阅读器");
+    m_lastVisibleSavedGeometry = saveGeometry();
     m_lastVisibleGeometry = geometry();
+    m_lastVisibleFrameGeometry = frameGeometry();
 }
 
 MainWindow::~MainWindow()
@@ -338,6 +356,9 @@ void MainWindow::onToggleTransparency()
     if (m_isTransparent) {
         exitTransparentMode();
     } else {
+        if (deferNormalModeTransition([this]() { enterTransparentMode(); })) {
+            return;
+        }
         enterTransparentMode();
     }
 }
@@ -345,8 +366,11 @@ void MainWindow::onToggleTransparency()
 void MainWindow::enterTransparentMode()
 {
     const QRect textGlobalRect(m_textBrowser->mapToGlobal(QPoint(0, 0)), m_textBrowser->size());
+    m_normalGeometryBeforeTransparentData = saveGeometry();
     m_normalGeometryBeforeTransparent = geometry();
+    m_normalFrameGeometryBeforeTransparent = frameGeometry();
     m_isTransparent = true;
+    m_isApplyingWindowGeometry = true;
     setAttribute(Qt::WA_TranslucentBackground);
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     m_textBrowser->setStyleSheet(
@@ -375,10 +399,13 @@ void MainWindow::enterTransparentMode()
     show();
     qApp->processEvents();
     adjustWindowToKeepTextRect(textGlobalRect);
+    qApp->processEvents();
+    m_isApplyingWindowGeometry = false;
 }
 
 void MainWindow::exitTransparentMode()
 {
+    m_isApplyingWindowGeometry = true;
     m_isTransparent = false;
     setAttribute(Qt::WA_TranslucentBackground, false);
     setWindowFlags(Qt::Window);
@@ -391,10 +418,14 @@ void MainWindow::exitTransparentMode()
     
     setStyleSheet("");
     updateAppearance();
-    if (m_normalGeometryBeforeTransparent.isValid()) {
-        setGeometry(m_normalGeometryBeforeTransparent);
+    if (!m_normalGeometryBeforeTransparentData.isEmpty()) {
+        applySavedWindowGeometry(m_normalGeometryBeforeTransparentData, true);
+    } else if (m_normalGeometryBeforeTransparent.isValid()) {
+        applyStableWindowGeometry(m_normalGeometryBeforeTransparent, true);
+    } else {
+        show();
     }
-    show();
+    scheduleFrameAlignment(m_normalFrameGeometryBeforeTransparent, true);
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
@@ -447,10 +478,8 @@ void MainWindow::moveEvent(QMoveEvent *event)
 {
     QMainWindow::moveEvent(event);
 
-    if (m_settings && !m_isTransparent && isVisible() && !isMinimized()) {
-        m_settings->setWindowGeometry(geometry());
-        m_settings->sync();
-        m_lastVisibleGeometry = geometry();
+    if (!m_isApplyingWindowGeometry && !m_isTransparent && isVisible() && !isMinimized()) {
+        scheduleGeometrySnapshot(true);
     }
 }
 
@@ -458,11 +487,21 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
 
-    if (m_settings && !m_isTransparent && isVisible() && !isMinimized()) {
-        m_settings->setWindowGeometry(geometry());
-        m_settings->sync();
-        m_lastVisibleGeometry = geometry();
+    if (!m_isApplyingWindowGeometry && !m_isTransparent && isVisible() && !isMinimized()) {
+        scheduleGeometrySnapshot(true);
     }
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+
+    if (m_hasInitialGeometryCalibration || m_isTransparent) {
+        return;
+    }
+
+    m_hasInitialGeometryCalibration = true;
+    scheduleGeometrySnapshot(true);
 }
 
 void MainWindow::wheelEvent(QWheelEvent *event)
@@ -485,12 +524,10 @@ void MainWindow::onHideToTray()
     if (isHidden()) {
         onRestoreFromTray();
     } else {
-        if (!isMinimized()) {
-            m_lastVisibleGeometry = geometry();
+        if (deferNormalModeTransition([this]() { hideToTrayImmediate(); })) {
+            return;
         }
-        hide();
-        m_tray->show();
-        m_tray->showMessage("阅读器已隐藏", "点击托盘图标恢复");
+        hideToTrayImmediate();
     }
 }
 
@@ -659,12 +696,15 @@ void MainWindow::onSettingsChanged()
 
 void MainWindow::onRestoreFromTray()
 {
-    if (m_lastVisibleGeometry.isValid()) {
-        setGeometry(m_lastVisibleGeometry);
+    m_isApplyingWindowGeometry = true;
+    if (!m_lastVisibleSavedGeometry.isEmpty()) {
+        applySavedWindowGeometry(m_lastVisibleSavedGeometry, true);
+    } else if (m_lastVisibleGeometry.isValid()) {
+        applyStableWindowGeometry(m_lastVisibleGeometry, true);
+    } else {
+        show();
     }
-    show();
-    activateWindow();
-    raise();
+    scheduleFrameAlignment(m_lastVisibleFrameGeometry, !m_isTransparent);
 }
 
 void MainWindow::onQuit()
@@ -694,6 +734,171 @@ void MainWindow::adjustWindowToKeepTextRect(const QRect& desiredGlobalRect)
     adjustedGeometry.setHeight(currentWindowGeometry.height() + (desiredGlobalRect.height() - currentGlobalRect.height()));
 
     setGeometry(adjustedGeometry);
+}
+
+void MainWindow::applySavedWindowGeometry(const QByteArray& savedGeometry, bool showWindow)
+{
+    if (savedGeometry.isEmpty()) {
+        if (showWindow) {
+            showNormal();
+        }
+        return;
+    }
+
+    restoreGeometry(savedGeometry);
+    qApp->processEvents();
+    if (showWindow) {
+        showNormal();
+    }
+    restoreGeometry(savedGeometry);
+    qApp->processEvents();
+}
+
+void MainWindow::applyStableWindowGeometry(const QRect& targetGeometry, bool showWindow)
+{
+    if (!targetGeometry.isValid()) {
+        if (showWindow) {
+            showNormal();
+        }
+        return;
+    }
+
+    setGeometry(targetGeometry);
+    if (showWindow) {
+        showNormal();
+    }
+    qApp->processEvents();
+    setGeometry(targetGeometry);
+    qApp->processEvents();
+}
+
+void MainWindow::alignWindowFrameTo(const QRect& targetFrameGeometry)
+{
+    if (!targetFrameGeometry.isValid()) {
+        return;
+    }
+
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        const QRect currentFrame = frameGeometry();
+        const QPoint delta = targetFrameGeometry.topLeft() - currentFrame.topLeft();
+        if (delta.isNull()) {
+            break;
+        }
+
+        move(pos() + delta);
+        qApp->processEvents();
+    }
+}
+
+void MainWindow::scheduleFrameAlignment(const QRect& targetFrameGeometry, bool persistAfterAlignment)
+{
+    const int restoreSerial = ++m_windowRestoreSerial;
+    const auto alignmentPass = [this, restoreSerial, targetFrameGeometry, persistAfterAlignment](bool finalPass) {
+        if (restoreSerial != m_windowRestoreSerial) {
+            return;
+        }
+
+        alignWindowFrameTo(targetFrameGeometry);
+        if (finalPass && persistAfterAlignment && !m_isTransparent) {
+            persistWindowGeometry();
+        }
+
+        if (finalPass) {
+            m_isApplyingWindowGeometry = false;
+            activateWindow();
+            raise();
+        }
+    };
+
+    QTimer::singleShot(0, this, [alignmentPass]() {
+        alignmentPass(false);
+    });
+    QTimer::singleShot(50, this, [alignmentPass]() {
+        alignmentPass(false);
+    });
+    QTimer::singleShot(150, this, [alignmentPass]() {
+        alignmentPass(false);
+    });
+    QTimer::singleShot(300, this, [alignmentPass]() {
+        alignmentPass(true);
+    });
+}
+
+void MainWindow::captureCurrentWindowGeometry(bool persistToSettings)
+{
+    if (!isVisible() || isMinimized() || m_isTransparent) {
+        return;
+    }
+
+    m_lastVisibleSavedGeometry = saveGeometry();
+    m_lastVisibleGeometry = geometry();
+    m_lastVisibleFrameGeometry = frameGeometry();
+
+    if (persistToSettings) {
+        persistWindowGeometry();
+    }
+}
+
+void MainWindow::scheduleGeometrySnapshot(bool persistToSettings, int delayMs)
+{
+    const int snapshotSerial = ++m_geometrySnapshotSerial;
+    m_hasPendingGeometrySnapshot = true;
+    QTimer::singleShot(qMax(0, delayMs), this, [this, snapshotSerial, persistToSettings]() {
+        if (snapshotSerial != m_geometrySnapshotSerial) {
+            return;
+        }
+
+        m_hasPendingGeometrySnapshot = false;
+        if (!m_isApplyingWindowGeometry) {
+            captureCurrentWindowGeometry(persistToSettings);
+        }
+    });
+}
+
+bool MainWindow::deferNormalModeTransition(const std::function<void()>& continuation)
+{
+    if (m_isTransparent || m_isApplyingWindowGeometry || isHidden() || isMinimized()) {
+        return false;
+    }
+
+    if (!m_hasPendingGeometrySnapshot && m_hasInitialGeometryCalibration) {
+        return false;
+    }
+
+    const int transitionSerial = ++m_pendingTransitionSerial;
+    scheduleGeometrySnapshot(true);
+    QTimer::singleShot(320, this, [this, transitionSerial, continuation]() {
+        if (transitionSerial != m_pendingTransitionSerial) {
+            return;
+        }
+        continuation();
+    });
+    return true;
+}
+
+void MainWindow::hideToTrayImmediate()
+{
+    if (!isMinimized()) {
+        captureCurrentWindowGeometry(!m_isTransparent);
+    }
+
+    hide();
+    m_tray->show();
+    m_tray->showMessage("阅读器已隐藏", "点击托盘图标恢复");
+}
+
+void MainWindow::persistWindowGeometry()
+{
+    if (!m_settings) {
+        return;
+    }
+
+    m_lastVisibleSavedGeometry = saveGeometry();
+    m_lastVisibleGeometry = geometry();
+    m_lastVisibleFrameGeometry = frameGeometry();
+    m_settings->setSavedWindowGeometry(m_lastVisibleSavedGeometry);
+    m_settings->setWindowGeometry(m_lastVisibleGeometry);
+    m_settings->sync();
 }
 
 int MainWindow::chapterIndexForLine(int lineNumber) const
